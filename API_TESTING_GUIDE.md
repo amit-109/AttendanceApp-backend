@@ -4,34 +4,49 @@ Complete testing guide with sample data and Postman collection for all API endpo
 
 ## 📋 Prerequisites
 
-1. **MongoDB** running locally on port 27017
+1. **MySQL** server running (local or remote)
 2. **Node.js** installed
 3. **Postman** installed for API testing
 4. Backend server running on `http://localhost:5000`
 
 ## 🚀 Quick Setup
 
-### 1. Start MongoDB
-```bash
-# On Windows (if using MongoDB Community Server)
-mongod
+### 1. Setup MySQL Database
+```sql
+-- Create database
+CREATE DATABASE attendance_app;
 
-# Or use MongoDB Compass
+-- Or use your existing database credentials
 ```
 
-### 2. Install Backend Dependencies
+### 2. Configure Environment
+Update the `.env` file in the backend folder:
+```
+DB_HOST=server.abhiworld.in
+DB_USER=securysc_app
+DB_PASSWORD=d62ur4EL2kWm
+DB_NAME=securysc_new_app
+DB_PORT=3306
+```
+
+### 3. Install Backend Dependencies
 ```bash
 cd backend
 npm install
 ```
 
-### 3. Start Backend Server
+### 4. Seed Database (Optional)
+```bash
+npm run seed
+```
+
+### 5. Start Backend Server
 ```bash
 npm start
 # Server will run on http://localhost:5000
 ```
 
-### 4. Import Postman Collection
+### 6. Import Postman Collection
 1. Open Postman
 2. Click "Import" button
 3. Select "File" tab
@@ -253,8 +268,8 @@ Authorization: Bearer {{admin_token}}
 
 ## 🔍 Common Issues & Solutions
 
-### **1. "MongoServerError: connect ECONNREFUSED"**
-**Solution:** Ensure MongoDB is running on port 27017
+### **1. "Access denied for user" MySQL Error**
+**Solution:** Check MySQL credentials in `.env` file and ensure database exists
 
 ### **2. "Unauthorized" Error**
 **Solution:** Check if JWT token is valid and not expired (24h expiry)
@@ -312,7 +327,7 @@ The React Native app automatically connects to these APIs at `http://localhost:5
 ## 🚀 Production Deployment
 
 For production:
-1. Change MongoDB URI to production database
+1. Update MySQL database credentials in `.env`
 2. Set strong JWT_SECRET
 3. Enable HTTPS
 4. Configure CORS for mobile app domains

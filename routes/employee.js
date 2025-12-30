@@ -1,8 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { auth, requireRole } = require('../middleware/auth');
-const Attendance = require('../models/Attendance');
-const Leave = require('../models/Leave');
+const { Op } = require('sequelize');
 
 const router = express.Router();
 
@@ -28,10 +27,13 @@ router.post('/checkin', [
   today.setHours(0, 0, 0, 0);
 
   try {
+    const { Attendance, User } = req.app.get('models');
     // Check if already checked in today
     const existingAttendance = await Attendance.findOne({
-      employee: req.user.id,
-      date: today
+      where: {
+        employeeId: req.user.id,
+        date: today
+      }
     });
 
     if (existingAttendance) {
@@ -39,18 +41,22 @@ router.post('/checkin', [
     }
 
     // Create new attendance record
-    const attendance = new Attendance({
-      employee: req.user.id,
+    const attendance = await Attendance.create({
+      employeeId: req.user.id,
       date: today,
       checkIn: new Date(),
-      location: latitude && longitude ? { latitude, longitude } : undefined,
-      photo: photo || undefined
+      latitude: latitude || null,
+      longitude: longitude || null,
+      photo: photo || null
     });
 
-    await attendance.save();
-
-    const populatedAttendance = await Attendance.findById(attendance.id)
-      .populate('employee', 'name email');
+    const populatedAttendance = await Attendance.findByPk(attendance.id, {
+      include: [{
+        model: User,
+        as: 'employee',
+        attributes: ['name', 'email']
+      }]
+    });
 
     res.json({
       message: 'Checked in successfully',
@@ -70,9 +76,12 @@ router.put('/checkout', async (req, res) => {
   today.setHours(0, 0, 0, 0);
 
   try {
+    const { Attendance, User } = req.app.get('models');
     const attendance = await Attendance.findOne({
-      employee: req.user.id,
-      date: today
+      where: {
+        employeeId: req.user.id,
+        date: today
+      }
     });
 
     if (!attendance) {
@@ -86,8 +95,13 @@ router.put('/checkout', async (req, res) => {
     attendance.checkOut = new Date();
     await attendance.save();
 
-    const populatedAttendance = await Attendance.findById(attendance.id)
-      .populate('employee', 'name email');
+    const populatedAttendance = await Attendance.findByPk(attendance.id, {
+      include: [{
+        model: User,
+        as: 'employee',
+        attributes: ['name', 'email']
+      }]
+    });
 
     res.json({
       message: 'Checked out successfully',
@@ -104,8 +118,11 @@ router.put('/checkout', async (req, res) => {
 // @access  Private/Employee
 router.get('/attendance', async (req, res) => {
   try {
-    const attendance = await Attendance.find({ employee: req.user.id })
-      .sort({ date: -1 });
+    const { Attendance } = req.app.get('models');
+    const attendance = await Attendance.findAll({
+      where: { employeeId: req.user.id },
+      order: [['date', 'DESC']]
+    });
 
     res.json(attendance);
   } catch (err) {
@@ -122,9 +139,12 @@ router.get('/today', async (req, res) => {
   today.setHours(0, 0, 0, 0);
 
   try {
+    const { Attendance } = req.app.get('models');
     const attendance = await Attendance.findOne({
-      employee: req.user.id,
-      date: today
+      where: {
+        employeeId: req.user.id,
+        date: today
+      }
     });
 
     if (!attendance) {
@@ -172,31 +192,40 @@ router.post('/leave', [
   }
 
   try {
+    const { Leave, User } = req.app.get('models');
     // Check for overlapping leave requests
     const overlappingLeave = await Leave.findOne({
-      employee: req.user.id,
-      status: { $in: ['pending', 'approved'] },
-      $or: [
-        { startDate: { $lte: end }, endDate: { $gte: start } }
-      ]
+      where: {
+        employeeId: req.user.id,
+        status: { [Op.in]: ['pending', 'approved'] },
+        [Op.or]: [
+          {
+            startDate: { [Op.lte]: end },
+            endDate: { [Op.gte]: start }
+          }
+        ]
+      }
     });
 
     if (overlappingLeave) {
       return res.status(400).json({ message: 'You already have a leave request for these dates' });
     }
 
-    const leave = new Leave({
-      employee: req.user.id,
+    const leave = await Leave.create({
+      employeeId: req.user.id,
       leaveType,
       startDate: start,
       endDate: end,
       reason
     });
 
-    await leave.save();
-
-    const populatedLeave = await Leave.findById(leave.id)
-      .populate('employee', 'name email');
+    const populatedLeave = await Leave.findByPk(leave.id, {
+      include: [{
+        model: User,
+        as: 'employee',
+        attributes: ['name', 'email']
+      }]
+    });
 
     res.json({
       message: 'Leave application submitted successfully',
@@ -213,9 +242,16 @@ router.post('/leave', [
 // @access  Private/Employee
 router.get('/leave', async (req, res) => {
   try {
-    const leaves = await Leave.find({ employee: req.user.id })
-      .sort({ createdAt: -1 })
-      .populate('approvedBy', 'name');
+    const { Leave, User } = req.app.get('models');
+    const leaves = await Leave.findAll({
+      where: { employeeId: req.user.id },
+      include: [{
+        model: User,
+        as: 'approver',
+        attributes: ['name']
+      }],
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json(leaves);
   } catch (error) {

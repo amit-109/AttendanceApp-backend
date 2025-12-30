@@ -1,5 +1,5 @@
 const express = require('express');
-const mongoose = require('mongoose');
+const { Sequelize } = require('sequelize');
 const cors = require('cors');
 const dotenv = require('dotenv');
 
@@ -11,13 +11,47 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/attendance', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
+// Connect to MySQL
+const sequelize = new Sequelize(
+  process.env.DB_NAME,
+  process.env.DB_USER,
+  process.env.DB_PASSWORD,
+  {
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    dialect: 'mysql',
+    logging: false
+  }
+);
+
+// Test the connection
+sequelize.authenticate()
+  .then(() => console.log('MySQL connected'))
+  .catch(err => console.error('MySQL connection error:', err));
+
+// Import models
+const User = require('./models/User')(sequelize);
+const Attendance = require('./models/Attendance')(sequelize);
+const Leave = require('./models/Leave')(sequelize);
+
+// Define associations
+User.hasMany(Attendance, { foreignKey: 'employeeId', as: 'attendances' });
+Attendance.belongsTo(User, { foreignKey: 'employeeId', as: 'employee' });
+
+User.hasMany(Leave, { foreignKey: 'employeeId', as: 'leaves' });
+Leave.belongsTo(User, { foreignKey: 'employeeId', as: 'employee' });
+
+Leave.belongsTo(User, { foreignKey: 'approvedById', as: 'approver' });
+User.hasMany(Leave, { foreignKey: 'approvedById', as: 'approvedLeaves' });
+
+// Sync database
+sequelize.sync({ alter: true })
+  .then(() => console.log('Database synced'))
+  .catch(err => console.error('Database sync error:', err));
+
+// Make sequelize available in routes
+app.set('sequelize', sequelize);
+app.set('models', { User, Attendance, Leave });
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));

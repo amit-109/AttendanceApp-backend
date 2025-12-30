@@ -2,7 +2,6 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const User = require('../models/User');
 
 const router = express.Router();
 
@@ -21,7 +20,8 @@ router.post('/login', [
   const { email, password } = req.body;
 
   try {
-    const user = await User.findOne({ email });
+    const { User } = req.app.get('models');
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -75,28 +75,27 @@ router.post('/register-admin', [
   const { name, email, password } = req.body;
 
   try {
-    let user = await User.findOne({ email });
+    const { User } = req.app.get('models');
+    let user = await User.findOne({ where: { email } });
     if (user) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
     // Check if any admin exists
-    const adminExists = await User.findOne({ role: 'admin' });
+    const adminExists = await User.findOne({ where: { role: 'admin' } });
     if (adminExists) {
       return res.status(403).json({ message: 'Admin already exists' });
     }
 
-    user = new User({
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    user = await User.create({
       name,
       email,
-      password,
+      password: hashedPassword,
       role: 'admin'
     });
-
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
-
-    await user.save();
 
     const payload = {
       id: user.id,

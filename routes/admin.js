@@ -2,9 +2,6 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { body, validationResult } = require('express-validator');
 const { auth, requireRole } = require('../middleware/auth');
-const User = require('../models/User');
-const Attendance = require('../models/Attendance');
-const Leave = require('../models/Leave');
 
 const router = express.Router();
 
@@ -17,9 +14,12 @@ router.use(requireRole(['admin']));
 // @access  Private/Admin
 router.get('/employees', async (req, res) => {
   try {
-    const employees = await User.find({ role: 'employee' })
-      .select('-password')
-      .sort({ createdAt: -1 });
+    const { User } = req.app.get('models');
+    const employees = await User.findAll({
+      where: { role: 'employee' },
+      attributes: { exclude: ['password'] },
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json(employees);
   } catch (err) {
@@ -44,25 +44,26 @@ router.post('/employees', [
   const { name, email, password } = req.body;
 
   try {
-    let user = await User.findOne({ email });
+    const { User } = req.app.get('models');
+    let user = await User.findOne({ where: { email } });
     if (user) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    user = new User({
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    user = await User.create({
       name,
       email,
-      password,
+      password: hashedPassword,
       role: 'employee'
     });
 
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
-
-    await user.save();
-
     // Return user without password
-    const userResponse = await User.findById(user.id).select('-password');
+    const userResponse = await User.findByPk(user.id, {
+      attributes: { exclude: ['password'] }
+    });
     res.json(userResponse);
   } catch (err) {
     console.error(err.message);
@@ -75,7 +76,10 @@ router.post('/employees', [
 // @access  Private/Admin
 router.get('/employees/:id', async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password');
+    const { User } = req.app.get('models');
+    const user = await User.findByPk(req.params.id, {
+      attributes: { exclude: ['password'] }
+    });
     if (!user || user.role !== 'employee') {
       return res.status(404).json({ message: 'Employee not found' });
     }
@@ -83,9 +87,6 @@ router.get('/employees/:id', async (req, res) => {
     res.json(user);
   } catch (err) {
     console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -106,14 +107,15 @@ router.put('/employees/:id', [
   const { name, email, isActive } = req.body;
 
   try {
-    let user = await User.findById(req.params.id);
+    const { User } = req.app.get('models');
+    let user = await User.findByPk(req.params.id);
     if (!user || user.role !== 'employee') {
       return res.status(404).json({ message: 'Employee not found' });
     }
 
     // Check if email is being changed and if it's already taken
     if (email && email !== user.email) {
-      const existingUser = await User.findOne({ email });
+      const existingUser = await User.findOne({ where: { email } });
       if (existingUser) {
         return res.status(400).json({ message: 'Email already in use' });
       }
@@ -125,13 +127,12 @@ router.put('/employees/:id', [
 
     await user.save();
 
-    const userResponse = await User.findById(user.id).select('-password');
+    const userResponse = await User.findByPk(user.id, {
+      attributes: { exclude: ['password'] }
+    });
     res.json(userResponse);
   } catch (err) {
     console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -141,7 +142,8 @@ router.put('/employees/:id', [
 // @access  Private/Admin
 router.delete('/employees/:id', async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const { User } = req.app.get('models');
+    const user = await User.findByPk(req.params.id);
     if (!user || user.role !== 'employee') {
       return res.status(404).json({ message: 'Employee not found' });
     }
@@ -150,15 +152,9 @@ router.delete('/employees/:id', async (req, res) => {
     user.isActive = false;
     await user.save();
 
-    // Optionally, you could hard delete:
-    // await User.findByIdAndDelete(req.params.id);
-
     res.json({ message: 'Employee deactivated successfully' });
   } catch (err) {
     console.error(err.message);
-    if (err.kind === 'ObjectId') {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -168,9 +164,15 @@ router.delete('/employees/:id', async (req, res) => {
 // @access  Private/Admin
 router.get('/attendance', async (req, res) => {
   try {
-    const attendance = await Attendance.find()
-      .populate('employee', 'name email')
-      .sort({ date: -1, checkIn: -1 });
+    const { Attendance, User } = req.app.get('models');
+    const attendance = await Attendance.findAll({
+      include: [{
+        model: User,
+        as: 'employee',
+        attributes: ['name', 'email']
+      }],
+      order: [['date', 'DESC'], ['checkIn', 'DESC']]
+    });
 
     res.json(attendance);
   } catch (err) {
@@ -184,10 +186,22 @@ router.get('/attendance', async (req, res) => {
 // @access  Private/Admin
 router.get('/leaves', async (req, res) => {
   try {
-    const leaves = await Leave.find()
-      .populate('employee', 'name email')
-      .populate('approvedBy', 'name')
-      .sort({ createdAt: -1 });
+    const { Leave, User } = req.app.get('models');
+    const leaves = await Leave.findAll({
+      include: [
+        {
+          model: User,
+          as: 'employee',
+          attributes: ['name', 'email']
+        },
+        {
+          model: User,
+          as: 'approver',
+          attributes: ['name']
+        }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
 
     res.json(leaves);
   } catch (error) {
@@ -211,7 +225,8 @@ router.put('/leaves/:id', [
   const { status, comments } = req.body;
 
   try {
-    const leave = await Leave.findById(req.params.id);
+    const { Leave, User } = req.app.get('models');
+    const leave = await Leave.findByPk(req.params.id);
 
     if (!leave) {
       return res.status(404).json({ message: 'Leave request not found' });
@@ -222,7 +237,7 @@ router.put('/leaves/:id', [
     }
 
     leave.status = status;
-    leave.approvedBy = req.user.id;
+    leave.approvedById = req.user.id;
     leave.approvedAt = new Date();
     if (comments) {
       leave.comments = comments;
@@ -230,9 +245,20 @@ router.put('/leaves/:id', [
 
     await leave.save();
 
-    const updatedLeave = await Leave.findById(leave.id)
-      .populate('employee', 'name email')
-      .populate('approvedBy', 'name');
+    const updatedLeave = await Leave.findByPk(leave.id, {
+      include: [
+        {
+          model: User,
+          as: 'employee',
+          attributes: ['name', 'email']
+        },
+        {
+          model: User,
+          as: 'approver',
+          attributes: ['name']
+        }
+      ]
+    });
 
     res.json({
       message: `Leave request ${status}`,
